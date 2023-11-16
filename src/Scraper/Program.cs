@@ -1,0 +1,1 @@
+﻿Console.WriteLine("This project should contain the scraping logic for retrieving all words!");
