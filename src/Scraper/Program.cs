@@ -22,6 +22,7 @@
             using var driver = new ChromeDriver("./chromedriver.exe", chromeOptions);
 
             await ReadMainWordsAsync(driver);
+            await ReadWordFormsAsync(driver);
         }
 
         private static async Task ReadMainWordsAsync(ChromeDriver driver)
@@ -54,6 +55,41 @@
 
                 pageIndex++;
                 stopwatch.Reset();
+            }
+        }
+
+        private static async Task ReadWordFormsAsync(ChromeDriver driver)
+        {
+            // TODO: Make Async
+            INavigation navigation = driver.Navigate();
+            string[] file = File.ReadAllLines(MAIN_WORDS_LIST);
+            for (int i = 0; i < file.Length; i++)
+            {
+                navigation.GoToUrl($"https://bg.wiktionary.org/wiki/{file[i]}");
+
+                try
+                {
+                    try
+                    {
+                        IWebElement showMoreLink = driver.FindElement(By.LinkText("Всички форми"));
+                        showMoreLink.Click();
+                    }
+                    catch (NotFoundException)
+                    {
+                        //
+                    }
+
+                    IWebElement containerElement = driver.FindElement(By.CssSelector("table.forms-table.plainlinks"));
+
+                    IWebElement[] wordsList = containerElement.FindElements(By.CssSelector("tbody > tr > td")).ToArray();
+                    string[] allWords = wordsList.Select(x => x.Text.Replace("·", string.Empty).Trim()).Where(x => !string.IsNullOrEmpty(x) && x != "—").ToArray();
+
+                    Console.WriteLine(string.Join(Environment.NewLine, allWords));
+                }
+                catch (NotFoundException)
+                {
+                    // 
+                }
             }
         }
 
