@@ -82,7 +82,7 @@
                     IWebElement containerElement = driver.FindElement(By.CssSelector("table.forms-table.plainlinks"));
 
                     IWebElement[] wordsList = containerElement.FindElements(By.CssSelector("tbody > tr > td")).ToArray();
-                    string[] allWords = wordsList.Select(x => x.Text.Replace("·", string.Empty).Trim()).Where(x => !string.IsNullOrEmpty(x) && x != "—").ToArray();
+                    string[] allWords = wordsList.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x) && x != "—").ToArray();
 
                     Console.WriteLine(string.Join(Environment.NewLine, allWords));
                 }
@@ -91,6 +91,11 @@
                     // 
                 }
             }
+        }
+
+        private static string SanitizeWord(string word)
+        {
+            return word.Replace("·", string.Empty).Trim();
         }
 
         private static (IWebElement Container, IWebElement? NextPageButton) FindMainWordElements(ChromeDriver driver)
