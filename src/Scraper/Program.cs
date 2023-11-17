@@ -11,6 +11,7 @@
     public static class Program
     {
         private const string MAIN_WORDS_LIST = "main-words-list.txt";
+        private const string FORMS_WORDS_LIST = "forms-words-list.txt";
 
         public static async Task Main()
         {
@@ -84,7 +85,8 @@
                     IWebElement[] wordsList = containerElement.FindElements(By.CssSelector("tbody > tr > td")).ToArray();
                     string[] allWords = wordsList.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x) && x != "—").ToArray();
 
-                    Console.WriteLine(string.Join(Environment.NewLine, allWords));
+                    //Console.WriteLine(string.Join(Environment.NewLine, allWords));
+                    await File.AppendAllLinesAsync(FORMS_WORDS_LIST, allWords);
                 }
                 catch (NotFoundException)
                 {
