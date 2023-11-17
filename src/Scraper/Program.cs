@@ -1,6 +1,7 @@
 ﻿namespace Scraper;
 
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -15,21 +16,16 @@ public static class Program
 
     public static async Task Main()
     {
-        var chromeOptions = new ChromeOptions();
-
-        // Starting the browser in headless mode should make everything faster.
-        chromeOptions.AddArgument("headless");
-
-        using var driver = new ChromeDriver("./chromedriver.exe", chromeOptions);
-
-        // await ReadMainWordsAsync(driver);
+        await ReadMainWordsAsync();
         await FormatWordsList(MAIN_WORDS_LIST);
-        
-        // await ReadWordFormsAsync(driver);
+
+        await ReadWordFormsAsync(workers: 5);
+        await FormatWordsList(FORMS_WORDS_LIST);
     }
 
-    private static async Task ReadMainWordsAsync(ChromeDriver driver)
+    private static async Task ReadMainWordsAsync()
     {
+        using var driver = InstantiateDriver();
         var navigation = driver.Navigate();
         navigation.GoToUrl("https://bg.wiktionary.org/w/index.php?title=Категория:Думи_в_българския_език");
 
@@ -61,32 +57,41 @@ public static class Program
         }
     }
 
-    private static async Task ReadWordFormsAsync(ChromeDriver driver)
+    private static async Task ReadWordFormsAsync(int workers)
     {
-        // Ensure that we are always working with a brand new file.
-        File.Delete(FORMS_WORDS_LIST);
-        
-        var navigation = driver.Navigate();
-        var file = await File.ReadAllLinesAsync(MAIN_WORDS_LIST);
-            
-        for (var i = 0; i < file.Length; i++)
+        var drivers = new ChromeDriver[workers];
+        for (var i = 0; i < workers; i++) drivers[i] = InstantiateDriver();
+
+        var availableDrivers = new ConcurrentQueue<ChromeDriver>(drivers);
+        var wordForms = new ConcurrentBag<string>();
+
+        try
         {
-            navigation.GoToUrl($"https://bg.wiktionary.org/wiki/{file[i]}");
-
-            try
-            {
-                ShowMoreFormsIfPossible(driver);
-
-                var wordsList = driver.FindElements(By.CssSelector("table.forms-table.plainlinks tbody > tr > td")).ToArray();
-                var allWords = wordsList.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x)).ToArray();
-
-                await File.AppendAllLinesAsync(FORMS_WORDS_LIST, allWords);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"Unexpected exception occurred: {e.Message}");
-            }
+            var mainWords = await File.ReadAllLinesAsync(MAIN_WORDS_LIST);
+            await Parallel.ForEachAsync(mainWords, new ParallelOptions { MaxDegreeOfParallelism = workers }, (word, _) => ScrapeWordFormsAsync(word, availableDrivers, wordForms));
+            await File.WriteAllLinesAsync(FORMS_WORDS_LIST, wordForms);
         }
+        finally
+        {
+            foreach (var driver in drivers) driver.Dispose();
+        }
+    }
+
+    private static ValueTask ScrapeWordFormsAsync(string word, ConcurrentQueue<ChromeDriver> availableDrivers, ConcurrentBag<string> wordForms)
+    {
+        if (!availableDrivers.TryDequeue(out var driver)) return ValueTask.CompletedTask;
+
+        var navigation = driver.Navigate();
+        navigation.GoToUrl($"https://bg.wiktionary.org/wiki/{word}");
+
+        ShowMoreFormsIfPossible(driver);
+
+        var wordsList = driver.FindElements(By.CssSelector("table.forms-table.plainlinks tbody > tr > td")).ToArray();
+        foreach (var wordForm in wordsList.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x)))
+            wordForms.Add(wordForm);
+
+        availableDrivers.Enqueue(driver);
+        return ValueTask.CompletedTask;
     }
 
     private static async Task FormatWordsList(string fileName)
@@ -108,8 +113,7 @@ public static class Program
         }
     }
 
-    private static string SanitizeWord(string word)
-        => word.Replace("·", string.Empty).Replace("—", string.Empty).Trim();
+    private static string SanitizeWord(string word) => word.Replace("·", string.Empty).Replace("—", string.Empty).Trim();
 
     private static (IWebElement Container, IWebElement? NextPageButton) FindMainWordElements(ChromeDriver driver)
     {
@@ -126,5 +130,15 @@ public static class Program
         }
 
         return (containerElement, nextPageButton);
+    }
+
+    private static ChromeDriver InstantiateDriver()
+    {
+        var chromeOptions = new ChromeOptions();
+
+        // Starting the browser in headless mode should make everything faster.
+        chromeOptions.AddArgument("headless");
+
+        return new ChromeDriver("./chromedriver.exe", chromeOptions);
     }
 }
