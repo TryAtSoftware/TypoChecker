@@ -8,9 +8,12 @@ using System.Threading.Tasks;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using System.Linq;
+using System.Text;
 
 public static class Program
 {
+    private const int BUFFER_SIZE = 1024;
+    
     private const string MAIN_WORDS_LIST = "main-words-list.txt";
     private const string FORMS_WORDS_LIST = "forms-words-list.txt";
 
@@ -19,18 +22,17 @@ public static class Program
         await ReadMainWordsAsync();
         await FormatWordsList(MAIN_WORDS_LIST);
 
-        await ReadWordFormsAsync(workers: 5);
+        await ReadWordFormsAsync(workers: Environment.ProcessorCount);
         await FormatWordsList(FORMS_WORDS_LIST);
     }
 
     private static async Task ReadMainWordsAsync()
     {
+        await using var fileStream = new FileStream(MAIN_WORDS_LIST, FileMode.Create, FileAccess.Write, FileShare.Read, bufferSize: BUFFER_SIZE, useAsync: true);
+
         using var driver = InstantiateDriver();
         var navigation = driver.Navigate();
         navigation.GoToUrl("https://bg.wiktionary.org/w/index.php?title=Категория:Думи_в_българския_език");
-
-        // Ensure that we are always working with a brand new file.
-        File.Delete(MAIN_WORDS_LIST);
 
         var pageIndex = 1;
         var stopwatch = new Stopwatch();
@@ -47,7 +49,8 @@ public static class Program
             stopwatch.Stop();
             Console.WriteLine($"Finished scraping page #{pageIndex} in {stopwatch.ElapsedMilliseconds} ms. Found {allWords.Length} new words");
 
-            await File.AppendAllLinesAsync(MAIN_WORDS_LIST, allWords);
+            foreach (var word in allWords) await fileStream.WriteAsync(Encoding.UTF8.GetBytes(word + Environment.NewLine));
+
             nextPageButton.Click();
 
             (containerElement, nextPageButton) = FindMainWordElements(driver);
@@ -61,15 +64,15 @@ public static class Program
     {
         var drivers = new ChromeDriver[workers];
         for (var i = 0; i < workers; i++) drivers[i] = InstantiateDriver();
-
+        
         var availableDrivers = new ConcurrentQueue<ChromeDriver>(drivers);
-        var wordForms = new ConcurrentBag<string>();
 
         try
         {
+            await using var fileStream = new FileStream(FORMS_WORDS_LIST, FileMode.Create, FileAccess.Write, FileShare.Read, bufferSize: BUFFER_SIZE, useAsync: true);
+            
             var mainWords = await File.ReadAllLinesAsync(MAIN_WORDS_LIST);
-            await Parallel.ForEachAsync(mainWords, new ParallelOptions { MaxDegreeOfParallelism = workers }, (word, _) => ScrapeWordFormsAsync(word, availableDrivers, wordForms));
-            await File.WriteAllLinesAsync(FORMS_WORDS_LIST, wordForms);
+            await Parallel.ForEachAsync(mainWords, new ParallelOptions { MaxDegreeOfParallelism = workers }, (word, _) => ScrapeWordFormsAsync(word, availableDrivers, fileStream));
         }
         finally
         {
@@ -77,21 +80,20 @@ public static class Program
         }
     }
 
-    private static ValueTask ScrapeWordFormsAsync(string word, ConcurrentQueue<ChromeDriver> availableDrivers, ConcurrentBag<string> wordForms)
+    private static async ValueTask ScrapeWordFormsAsync(string word, ConcurrentQueue<ChromeDriver> availableDrivers, Stream stream)
     {
-        if (!availableDrivers.TryDequeue(out var driver)) return ValueTask.CompletedTask;
+        if (!availableDrivers.TryDequeue(out var driver)) return;
 
         var navigation = driver.Navigate();
         navigation.GoToUrl($"https://bg.wiktionary.org/wiki/{word}");
 
         ShowMoreFormsIfPossible(driver);
 
-        var wordsList = driver.FindElements(By.CssSelector("table.forms-table.plainlinks tbody > tr > td")).ToArray();
+        var wordsList = driver.FindElements(By.CssSelector(".forms-table tbody > tr > td")).ToArray();
         foreach (var wordForm in wordsList.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x)))
-            wordForms.Add(wordForm);
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(wordForm + Environment.NewLine));
 
         availableDrivers.Enqueue(driver);
-        return ValueTask.CompletedTask;
     }
 
     private static async Task FormatWordsList(string fileName)
