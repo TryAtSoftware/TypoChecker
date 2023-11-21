@@ -1,4 +1,6 @@
 
+using API.Settings;
+
 namespace API
 {
     public class Program
@@ -8,6 +10,8 @@ namespace API
             var builder = WebApplication.CreateBuilder(args);
 
             // Add services to the container.
+            builder.Configuration.AddJsonFile("appsettings.local.json", optional: true);
+            builder.Services.Configure<DocumentIntelligenceSettings>(builder.Configuration.GetSection(DocumentIntelligenceSettings.Section));
 
             builder.Services.AddControllers();
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
