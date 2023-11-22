@@ -87,11 +87,20 @@ public static class Program
         var navigation = driver.Navigate();
         navigation.GoToUrl($"https://bg.wiktionary.org/wiki/{word}");
 
-        ShowMoreFormsIfPossible(driver);
+        var moreFormsAreShown = ShowMoreFormsIfPossible(driver);
+        var wordForms = FindForms(driver);
 
-        var wordsList = driver.FindElements(By.CssSelector(".forms-table tbody > tr > td")).ToArray();
-        foreach (var wordForm in wordsList.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x)))
-            await stream.WriteAsync(Encoding.UTF8.GetBytes(wordForm + Environment.NewLine));
+        if (wordForms.Length == 0)
+        {
+            if (!moreFormsAreShown && wordForms.Length == 0)
+            {
+                navigation.GoToUrl($"https://bg.wiktionary.org/wiki/Шаблон:Словоформи/{word}");
+                wordForms = FindForms(driver);
+            }
+
+            foreach (var wordForm in wordForms.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x)))
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(wordForm + Environment.NewLine));
+        }
 
         availableDrivers.Enqueue(driver);
     }
@@ -102,16 +111,18 @@ public static class Program
         await File.WriteAllLinesAsync(fileName, allWords.Select(w => w.ToLower().Split(' ', '-')).SelectMany(x => x).Distinct().Order());
     }
 
-    private static void ShowMoreFormsIfPossible(ChromeDriver driver)
+    private static bool ShowMoreFormsIfPossible(ChromeDriver driver)
     {
         try
         {
             var showMoreLink = driver.FindElement(By.LinkText("Всички форми"));
             showMoreLink.Click();
+            return true;
         }
         catch (NotFoundException)
         {
             // There is not "Show more" link to be clicked.
+            return false;
         }
     }
 
@@ -133,6 +144,8 @@ public static class Program
 
         return (containerElement, nextPageButton);
     }
+
+    private static IWebElement[] FindForms(ChromeDriver driver) => driver.FindElements(By.CssSelector(".forms-table tbody > tr > td")).ToArray();
 
     private static ChromeDriver InstantiateDriver()
     {
