@@ -90,17 +90,14 @@ public static class Program
         var moreFormsAreShown = ShowMoreFormsIfPossible(driver);
         var wordForms = FindForms(driver);
 
-        if (wordForms.Length == 0)
+        if (!moreFormsAreShown && wordForms.Length == 0)
         {
-            if (!moreFormsAreShown && wordForms.Length == 0)
-            {
-                navigation.GoToUrl($"https://bg.wiktionary.org/wiki/Шаблон:Словоформи/{word}");
-                wordForms = FindForms(driver);
-            }
-
-            foreach (var wordForm in wordForms.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x)))
-                await stream.WriteAsync(Encoding.UTF8.GetBytes(wordForm + Environment.NewLine));
+            navigation.GoToUrl($"https://bg.wiktionary.org/wiki/Шаблон:Словоформи/{word}");
+            wordForms = FindForms(driver);
         }
+
+        foreach (var wordForm in wordForms.Select(x => SanitizeWord(x.Text)).Where(x => !string.IsNullOrEmpty(x)))
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(wordForm + Environment.NewLine));
 
         availableDrivers.Enqueue(driver);
     }
