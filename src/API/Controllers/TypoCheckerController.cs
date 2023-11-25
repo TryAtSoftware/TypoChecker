@@ -6,16 +6,21 @@ using API.Features;
 using API.Settings;
 using Azure;
 using Azure.AI.FormRecognizer.DocumentAnalysis;
+using iText.IO.Image;
 using iText.Kernel.Pdf;
+using itext.pdfimage.Extensions;
+using iText.Layout;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using SkiaSharp;
+using System.Drawing.Imaging;
+using System.Drawing;
+using iText.Kernel.Pdf.Canvas;
 
 [ApiController, Route("api")]
 public class TypoCheckerController : ControllerBase
 {
     private const double MIN_CONFIDENCE = 0.8;
-    private const string ENDPOINT = "https://typochecker-ocr.cognitiveservices.azure.com/";
 
     private static readonly char[] _delimiters = ".,-!?:;'\"()".ToCharArray();
     private static readonly SKPaint _incorrectWordPaint = new SKPaint { Color = SKColors.Red, Style = SKPaintStyle.Stroke };
@@ -29,7 +34,7 @@ public class TypoCheckerController : ControllerBase
         var settings = options.Value ?? throw new InvalidOperationException("DocumentIntelligenceSettings must be configured!");
         this._wordsRegister = wordsRegister ?? throw new ArgumentNullException(nameof(wordsRegister));
 
-        this._client = new DocumentAnalysisClient(new Uri(ENDPOINT), new AzureKeyCredential(settings.APIKey));
+        this._client = new DocumentAnalysisClient(new Uri(settings.Endpoint), new AzureKeyCredential(settings.APIKey));
     }
 
     [HttpPost("check_imgs")]
@@ -65,21 +70,53 @@ public class TypoCheckerController : ControllerBase
     private async ValueTask ProcessPdfAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
     {
         var pathToFile = Path.Combine(pathToDataDirectory, file.FileName);
-        
-        var pathToPagesDirectory = Path.Combine(pathToDataDirectory, Path.GetFileNameWithoutExtension(file.FileName));
-        Directory.CreateDirectory(pathToPagesDirectory);
-        
         await SaveFileAsync(pathToFile, file, cancellationToken);
 
-        var pages = SplitPdfInPages(pathToFile, pathToPagesDirectory);
-        var parallelOptions = new ParallelOptions { CancellationToken = cancellationToken, MaxDegreeOfParallelism = 5 };
+        var analyzationResult = await AnalyzeAsync(pathToFile, this._client, cancellationToken);
 
-        var analyzeResults = new AnalyzeResult[pages.Count];
-        await Parallel.ForEachAsync(pages.Select((p, i) => (PathToPage: p, Index: i)), parallelOptions, async (pageData, ct) =>
+        var analyzationResultPerPage = new List<IReadOnlyList<DocumentWord>>();
+
+        foreach(var page in analyzationResult.Pages) {
+            analyzationResultPerPage.Add(page.Words);
+        }
+
+        using var pdfReader = new PdfReader(pathToFile);
+        var pathToWriteableFile = Path.Combine(pathToResultDirectory, file.FileName);
+        System.IO.File.Copy(pathToFile, pathToWriteableFile);
+        using var pdfWriter = new PdfWriter(pathToWriteableFile);
+        using var pdfDocument = new PdfDocument(pdfReader, pdfWriter);
+
+        //TODO: Make parallel async
+        for (int i = 1; i <= pdfDocument.GetNumberOfPages(); i++)
         {
-            var currentResult = await AnalyzeAsync(pageData.PathToPage, this._client, ct);
-            analyzeResults[pageData.Index] = currentResult;
-        });
+            var page = pdfDocument.GetPage(i);
+            using var bitmap = ToSKBitmap(page.ConvertPageToBitmap()).Result;
+            using var canvas = new SKCanvas(bitmap);
+            var pdfCanvas = new PdfCanvas(page);
+
+            //TODO: OrganizePageWords not implemented
+            var analyzedWords = OrganizePageWords(analyzationResultPerPage[i]);
+            var statusses = new WordStatus[analyzedWords.Length];
+
+            //TODO: Outline wrong words
+            this.ClassifyWords(analyzedWords, statusses);
+            //OutlineWord()
+
+            using var imageData = bitmap.Encode(SKEncodedImageFormat.Png, quality: 100);
+            //TODO: SaveEditedPageAsync not implemented
+            await SaveEditedPageAsync(pdfCanvas, imageData, cancellationToken);
+        }
+    }
+    public async Task<SKBitmap> ToSKBitmap(Bitmap bitmap)
+    {
+        using (var stream = new MemoryStream())
+        {
+            bitmap.Save(stream, ImageFormat.Png);
+
+            stream.Seek(0, SeekOrigin.Begin);
+
+            return SKBitmap.Decode(stream);
+        }
     }
 
     private async ValueTask ProcessImageAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
@@ -94,7 +131,6 @@ public class TypoCheckerController : ControllerBase
         using var canvas = new SKCanvas(bitmap);
 
         var analyzedWords = OrganizeWords(analyzationResult);
-        var test = analyzedWords.OrderByDescending(x => x.Word.Confidence).ToArray();
         var statusses = new WordStatus[analyzedWords.Length];
 
         this.ClassifyWords(analyzedWords, statusses);
@@ -187,31 +223,6 @@ public class TypoCheckerController : ControllerBase
 
     private static bool IsReadable(DocumentWord word) => word.Confidence >= MIN_CONFIDENCE;
 
-    private static List<string> SplitPdfInPages(string pathToFile, string pathToPagesDirectory)
-    {
-        using var pdfReader = new PdfReader(pathToFile);
-        using var pdfDocument = new PdfDocument(pdfReader);
-
-        var countOfPages = pdfDocument.GetNumberOfPages();
-
-        var result = new List<string>();
-        for (var i = 1; i <= countOfPages; i++)
-        {
-            var page = pdfDocument.GetPage(i);
-
-            var pathToSplitResult = Path.Combine(pathToPagesDirectory, $"{i}.pdf");
-            result.Add(pathToSplitResult);
-
-            using var pdfWriter = new PdfWriter(pathToSplitResult);
-            using var pdfSplitResult = new PdfDocument(pdfWriter);
-
-            pdfDocument.CopyPagesTo(i, i, pdfSplitResult);
-            pdfSplitResult.Close();
-        }
-
-        return result;
-    }
-
     private static async Task SaveFileAsync(string pathToFile, IFormFile formFile, CancellationToken cancellationToken)
     {
         await using var fileStream = new FileStream(pathToFile, FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -221,7 +232,7 @@ public class TypoCheckerController : ControllerBase
     private static async Task<AnalyzeResult> AnalyzeAsync(string pathToFile, DocumentAnalysisClient client, CancellationToken cancellationToken)
     {
         await using var fileStream = new FileStream(pathToFile, FileMode.Open, FileAccess.Read, FileShare.None);
-        var operation = await client.AnalyzeDocumentAsync(WaitUntil.Completed, "prebuilt-read", fileStream, new AnalyzeDocumentOptions { Locale = "bg" }, cancellationToken);
+        var operation = await client.AnalyzeDocumentAsync(WaitUntil.Completed, "prebuilt-read", fileStream, new AnalyzeDocumentOptions { Locale = "bg", Pages = { "1-1999" } }, cancellationToken);
         return operation.Value;
     }
 
@@ -240,7 +251,13 @@ public class TypoCheckerController : ControllerBase
         await using var imageDataStream = imageData.AsStream(streamDisposesData: false);
         await imageDataStream.CopyToAsync(fileStream, cancellationToken);
     }
+    private static async Task SaveEditedPageAsync(PdfCanvas pdfCanvas, SKData imageData, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+        //pdfCanvas.AddImageAt()
 
+        pdfCanvas.Release();
+    }
     private static string SanitizeWord(string originalWord) => originalWord.Trim(_delimiters);
 
     private static WordWrapper[] OrganizeWords(AnalyzeResult analyzeResult)
@@ -265,6 +282,14 @@ public class TypoCheckerController : ControllerBase
         return result.ToArray();
     }
 
+    private static WordWrapper[] OrganizePageWords(IReadOnlyList<DocumentWord> page)
+    {
+        var result = new List<WordWrapper>();
+
+        throw new NotImplementedException();
+
+        return result.ToArray();
+    }
     private sealed record WordWrapper
     {
         public required int LineIndex { get; init; }
