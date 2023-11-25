@@ -1,8 +1,7 @@
-﻿namespace API.Features
+﻿namespace API.Features;
+
+public interface IWordsRegister
 {
-    public interface IWordsRegister
-    {
-        public bool Contains(string word);
-        public Task InitializeAsync(CancellationToken cancellationToken);
-    }
+    bool Contains(string word);
+    void Register(string word);
 }
