@@ -1,5 +1,6 @@
 ﻿namespace Scraper;
 
+using System;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -11,6 +12,7 @@ using OpenQA.Selenium.Interactions;
 public class SlovoredScraper : IScraper
 {
     private static readonly Regex _wordFormsRegex = new (@"(?<=^\s{3})\w+", RegexOptions.Multiline);
+    private static readonly string _categoriesSeparator = $"{Environment.NewLine}{Environment.NewLine}{Environment.NewLine}{Environment.NewLine}";
     
     public async Task ReadMainWords(IWebDriver driver, Stream resultStream, CancellationToken cancellationToken = default)
     {
@@ -44,18 +46,23 @@ public class SlovoredScraper : IScraper
         navigation.GoToUrl($"https://slovored.com/search/pravopisen-rechnik/{word}");
 
         var informationElement = driver.FindElement(By.TagName("pre"));
-        var informationContent = informationElement.Text;
+        var informationContents = informationElement.Text.Split(_categoriesSeparator);
 
-        var hasSuperlatives = informationContent.Contains("прилагателно име") || informationContent.Contains("наречие");
-
-        foreach (var wordForm in _wordFormsRegex.Matches(informationContent).Select(x => x.Value))
+        foreach (var informationContent in informationContents)
         {
-            await resultStream.WriteAsync(wordForm.ToBytes(), cancellationToken);
+            // Some words are both adjectives and verbs (e.g. "сбит") - in this case we need to use only the adjective forms!
+            var hasSuperlatives = informationContent.Contains("прилагателно име") || informationContent.Contains("наречие");
+            if (!hasSuperlatives) return;
             
-            if (hasSuperlatives)
+            foreach (var wordForm in _wordFormsRegex.Matches(informationContent).Select(x => x.Value))
             {
-                await resultStream.WriteAsync($"по-{wordForm}".ToBytes(), cancellationToken);
-                await resultStream.WriteAsync($"най-{wordForm}".ToBytes(), cancellationToken);
+                await resultStream.WriteAsync(wordForm.ToBytes(), cancellationToken);
+                
+                if (hasSuperlatives)
+                {
+                    await resultStream.WriteAsync($"по-{wordForm}".ToBytes(), cancellationToken);
+                    await resultStream.WriteAsync($"най-{wordForm}".ToBytes(), cancellationToken);
+                }
             }
         }
     }
