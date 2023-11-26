@@ -1,30 +1,37 @@
 ﻿namespace API.Controllers;
 
+using System.IO.Compression;
+using System.Net.Mime;
 using System.Text;
-using System.Threading;
 using API.Features;
 using API.Settings;
 using Azure;
 using Azure.AI.FormRecognizer.DocumentAnalysis;
-using iText.IO.Image;
+using iText.Kernel.Colors;
 using iText.Kernel.Pdf;
-using itext.pdfimage.Extensions;
-using iText.Layout;
+using iText.Kernel.Pdf.Canvas;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using SkiaSharp;
-using System.Drawing.Imaging;
-using System.Drawing;
-using iText.Kernel.Pdf.Canvas;
+using PdfColor = iText.Kernel.Colors.Color;
+using SystemColor = System.Drawing.Color;
 
 [ApiController, Route("api")]
 public class TypoCheckerController : ControllerBase
 {
+    private const string STORAGE_DIRECTORY_NAME = "_storage";
+    private const string DATA_DIRECTORY_NAME = "data";
+    private const string RESULTS_DIRECTORY_NAME = "results";
     private const double MIN_CONFIDENCE = 0.8;
+    private const int INCH_TO_POINTS = 72;
 
-    private static readonly char[] _delimiters = ".,-!?:;'\"()".ToCharArray();
-    private static readonly SKPaint _incorrectWordPaint = new SKPaint { Color = SKColors.Red, Style = SKPaintStyle.Stroke };
-    private static readonly SKPaint _unreadableWordPaint = new SKPaint { Color = SKColors.Yellow, Style = SKPaintStyle.Stroke };
+    private static readonly char[] _delimiters = ".,-!?:;'\"„“()".ToCharArray();
+
+    private static readonly PdfColor _incorrectWordPdfColor = new DeviceRgb(SystemColor.Red);
+    private static readonly PdfColor _unreadableWordPdfColor = new DeviceRgb(SystemColor.Orange);
+
+    private static readonly SKPaint _incorrectWordImgPaint = new SKPaint { Color = SKColors.Red, Style = SKPaintStyle.Stroke };
+    private static readonly SKPaint _unreadableWordImgPaint = new SKPaint { Color = SKColors.Orange, Style = SKPaintStyle.Stroke };
 
     private readonly IWordsRegister _wordsRegister;
     private readonly DocumentAnalysisClient _client;
@@ -49,7 +56,7 @@ public class TypoCheckerController : ControllerBase
         var parallelOptions = new ParallelOptions { CancellationToken = cancellationToken, MaxDegreeOfParallelism = 5 };
         await Parallel.ForEachAsync(this.Request.Form.Files, parallelOptions, (file, ct) => this.ProcessImageAsync(pathToDataDirectory, pathToResultDirectory, file, ct));
 
-        return this.Ok();
+        return await this.FinalizeRequestAsync(pathToResultDirectory);
     }
 
     [HttpPost("check_pdfs")]
@@ -64,65 +71,44 @@ public class TypoCheckerController : ControllerBase
         var parallelOptions = new ParallelOptions { CancellationToken = cancellationToken, MaxDegreeOfParallelism = 5 };
         await Parallel.ForEachAsync(this.Request.Form.Files, parallelOptions, (file, ct) => this.ProcessPdfAsync(pathToDataDirectory, pathToResultDirectory, file, ct));
 
-        return this.Ok();
+        return await this.FinalizeRequestAsync(pathToResultDirectory);
     }
 
     private async ValueTask ProcessPdfAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
     {
         var pathToFile = Path.Combine(pathToDataDirectory, file.FileName);
+        var pathToResult = Path.Combine(pathToResultDirectory, file.FileName);
         await SaveFileAsync(pathToFile, file, cancellationToken);
 
         var analyzationResult = await AnalyzeAsync(pathToFile, this._client, cancellationToken);
 
-        var analyzationResultPerPage = new List<IReadOnlyList<DocumentWord>>();
-
-        foreach(var page in analyzationResult.Pages) {
-            analyzationResultPerPage.Add(page.Words);
-        }
-
         using var pdfReader = new PdfReader(pathToFile);
-        var pathToWriteableFile = Path.Combine(pathToResultDirectory, file.FileName);
-        System.IO.File.Copy(pathToFile, pathToWriteableFile);
-        using var pdfWriter = new PdfWriter(pathToWriteableFile);
+        await using var pdfWriter = new PdfWriter(pathToResult);
         using var pdfDocument = new PdfDocument(pdfReader, pdfWriter);
 
-        //TODO: Make parallel async
-        for (int i = 1; i <= pdfDocument.GetNumberOfPages(); i++)
+        var numberOfPages = pdfDocument.GetNumberOfPages();
+        var pageHeights = new float[numberOfPages];
+        var canvases = new PdfCanvas[numberOfPages];
+        for (var i = 0; i < numberOfPages; i++)
         {
-            var page = pdfDocument.GetPage(i);
-            using var bitmap = ToSKBitmap(page.ConvertPageToBitmap()).Result;
-            using var canvas = new SKCanvas(bitmap);
-            var pdfCanvas = new PdfCanvas(page);
-
-            //TODO: OrganizePageWords not implemented
-            var analyzedWords = OrganizePageWords(analyzationResultPerPage[i]);
-            var statusses = new WordStatus[analyzedWords.Length];
-
-            //TODO: Outline wrong words
-            this.ClassifyWords(analyzedWords, statusses);
-            //OutlineWord()
-
-            using var imageData = bitmap.Encode(SKEncodedImageFormat.Png, quality: 100);
-            //TODO: SaveEditedPageAsync not implemented
-            await SaveEditedPageAsync(pdfCanvas, imageData, cancellationToken);
+            var page = pdfDocument.GetPage(i + 1);
+            pageHeights[i] = page.GetPageSize().GetHeight();
+            canvases[i] = new PdfCanvas(page);
         }
-    }
-    public async Task<SKBitmap> ToSKBitmap(Bitmap bitmap)
-    {
-        using (var stream = new MemoryStream())
-        {
-            bitmap.Save(stream, ImageFormat.Png);
 
-            stream.Seek(0, SeekOrigin.Begin);
+        var analyzedWords = OrganizeWords(analyzationResult);
+        var statuses = new WordStatus[analyzedWords.Length];
 
-            return SKBitmap.Decode(stream);
-        }
+        this.ClassifyWords(analyzedWords, statuses);
+
+        for (var i = 0; i < analyzedWords.Length; i++) OutlineWord(analyzedWords[i].Word, statuses[i], canvases[analyzedWords[i].PageIndex], pageHeights[analyzedWords[i].PageIndex]);
+        pdfDocument.Close();
     }
 
     private async ValueTask ProcessImageAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
     {
         var pathToFile = Path.Combine(pathToDataDirectory, file.FileName);
-        var pathToResult = Path.Combine(pathToResultDirectory, $"{Path.GetFileNameWithoutExtension(file.FileName)}.png");
+        var pathToResult = Path.Combine(pathToResultDirectory, Path.ChangeExtension(file.FileName, "png"));
         await SaveFileAsync(pathToFile, file, cancellationToken);
 
         var analyzationResult = await AnalyzeAsync(pathToFile, this._client, cancellationToken);
@@ -131,36 +117,60 @@ public class TypoCheckerController : ControllerBase
         using var canvas = new SKCanvas(bitmap);
 
         var analyzedWords = OrganizeWords(analyzationResult);
-        var statusses = new WordStatus[analyzedWords.Length];
+        var statuses = new WordStatus[analyzedWords.Length];
 
-        this.ClassifyWords(analyzedWords, statusses);
+        this.ClassifyWords(analyzedWords, statuses);
 
-        for (var i = 0; i < analyzedWords.Length; i++)
-            OutlineWord(analyzedWords[i].Word, statusses[i], canvas);
+        for (var i = 0; i < analyzedWords.Length; i++) OutlineWord(analyzedWords[i].Word, statuses[i], canvas);
 
         using var imageData = bitmap.Encode(SKEncodedImageFormat.Png, quality: 100);
         await SaveEditedImageAsync(pathToResult, imageData, cancellationToken);
     }
 
-    private void OutlineWord(DocumentWord word, WordStatus status, SKCanvas canvas)
+    private static void OutlineWord(DocumentWord word, WordStatus status, PdfCanvas canvas, float height)
     {
-        SKPaint? paint = status switch
+        var color = status switch
         {
-            WordStatus.Unreadable => _unreadableWordPaint,
-            WordStatus.Incorrect => _incorrectWordPaint,
+            WordStatus.Unreadable => _unreadableWordPdfColor,
+            WordStatus.Incorrect => _incorrectWordPdfColor,
+            _ => null
+        };
+
+        if (color is null) return;
+
+        for (var i = 0; i < word.BoundingPolygon.Count; i++)
+        {
+            var nextIndex = (i + 1) % word.BoundingPolygon.Count;
+
+            canvas.SetStrokeColor(color);
+
+            // iText7 uses points (pt). However, the Document Intelligence service returns coordinates in inches (for PDF documents). That's why we need to convert all values.
+            // iText7 uses the bottom-left corner as a reference point. However, the Document Intelligence service uses the top-left corner as a reference point. That's why we need to "flip" the Y coordinates.
+            canvas.MoveTo(word.BoundingPolygon[i].X * INCH_TO_POINTS, height - word.BoundingPolygon[i].Y * INCH_TO_POINTS);
+            canvas.LineTo(word.BoundingPolygon[nextIndex].X * INCH_TO_POINTS, height - word.BoundingPolygon[nextIndex].Y * INCH_TO_POINTS);
+            canvas.Stroke();
+        }
+    }
+
+    private static void OutlineWord(DocumentWord word, WordStatus status, SKCanvas canvas)
+    {
+        var paint = status switch
+        {
+            WordStatus.Unreadable => _unreadableWordImgPaint,
+            WordStatus.Incorrect => _incorrectWordImgPaint,
             _ => null
         };
 
         if (paint is null) return;
 
-        for (var j = 0; j < word.BoundingPolygon.Count; j++)
+        for (var i = 0; i < word.BoundingPolygon.Count; i++)
         {
-            var nextIndex = (j + 1) % word.BoundingPolygon.Count;
-            canvas.DrawLine(word.BoundingPolygon[j].X, word.BoundingPolygon[j].Y, word.BoundingPolygon[nextIndex].X, word.BoundingPolygon[nextIndex].Y, paint);
+            var nextIndex = (i + 1) % word.BoundingPolygon.Count;
+            canvas.DrawLine(word.BoundingPolygon[i].X, word.BoundingPolygon[i].Y, word.BoundingPolygon[nextIndex].X, word.BoundingPolygon[nextIndex].Y, paint);
         }
     }
 
-    private void ClassifyWords(WordWrapper[] analyzedWords, WordStatus[] statusses)
+    private void ClassifyWords(WordWrapper[] analyzedWords, WordStatus[] statuses)
     {
         var index = 0;
         var wordBuilder = new StringBuilder();
@@ -169,24 +179,21 @@ public class TypoCheckerController : ControllerBase
         {
             if (!IsReadable(analyzedWords[index].Word))
             {
-                statusses[index] = WordStatus.Unreadable;
+                statuses[index] = WordStatus.Unreadable;
                 index++;
             }
             else
             {
                 int wordSpan = 1, prevLineIndex = analyzedWords[index].LineIndex;
-                while (index + wordSpan < analyzedWords.Length
-                    && IsReadable(analyzedWords[index + wordSpan].Word)
-                    && analyzedWords[index + wordSpan - 1].Word.Content[^1] == '-'
-                    && analyzedWords[index + wordSpan].LineIndex > prevLineIndex)
+                while (index + wordSpan < analyzedWords.Length && IsReadable(analyzedWords[index + wordSpan].Word) && analyzedWords[index + wordSpan - 1].Word.Content[^1] == '-' && analyzedWords[index + wordSpan].LineIndex > prevLineIndex)
                 {
                     prevLineIndex = analyzedWords[index + wordSpan].LineIndex;
                     wordSpan++;
                 }
 
                 var isCorrect = this.CheckCorrectness(analyzedWords, index, wordSpan, wordBuilder);
-                WordStatus status = isCorrect ? WordStatus.Correct : WordStatus.Incorrect;
-                for (var i = 0; i < wordSpan; i++) statusses[index + i] = status;
+                var status = isCorrect ? WordStatus.Correct : WordStatus.Incorrect;
+                for (var i = 0; i < wordSpan; i++) statuses[index + i] = status;
 
                 index += wordSpan;
             }
@@ -217,9 +224,19 @@ public class TypoCheckerController : ControllerBase
 
     private string AccessSanitizedTraceIdentifier() => this.HttpContext.TraceIdentifier.Replace(':', '_');
 
-    private string ConstructPathToDataDirectory() => Path.Combine(AppContext.BaseDirectory, "_storage", this.AccessSanitizedTraceIdentifier(), "data");
+    private string ConstructPathToDataDirectory() => Path.Combine(AppContext.BaseDirectory, STORAGE_DIRECTORY_NAME, this.AccessSanitizedTraceIdentifier(), DATA_DIRECTORY_NAME);
 
-    private string ConstructPathToResultDirectory() => Path.Combine(AppContext.BaseDirectory, "_storage", this.AccessSanitizedTraceIdentifier(), "results");
+    private string ConstructPathToResultDirectory() => Path.Combine(AppContext.BaseDirectory, STORAGE_DIRECTORY_NAME, this.AccessSanitizedTraceIdentifier(), RESULTS_DIRECTORY_NAME);
+
+    private async Task<IActionResult> FinalizeRequestAsync(string pathToResultDirectory)
+    {
+        var pathToZip = Path.ChangeExtension(pathToResultDirectory, "zip");
+
+        await using var fileStream = new FileStream(pathToZip, FileMode.Create, FileAccess.Write, FileShare.None);
+        ZipFile.CreateFromDirectory(pathToResultDirectory, fileStream);
+
+        return this.PhysicalFile(pathToZip, MediaTypeNames.Application.Zip, fileDownloadName: Path.GetFileName(pathToZip));
+    }
 
     private static bool IsReadable(DocumentWord word) => word.Confidence >= MIN_CONFIDENCE;
 
@@ -251,19 +268,14 @@ public class TypoCheckerController : ControllerBase
         await using var imageDataStream = imageData.AsStream(streamDisposesData: false);
         await imageDataStream.CopyToAsync(fileStream, cancellationToken);
     }
-    private static async Task SaveEditedPageAsync(PdfCanvas pdfCanvas, SKData imageData, CancellationToken cancellationToken)
-    {
-        throw new NotImplementedException();
-        //pdfCanvas.AddImageAt()
 
-        pdfCanvas.Release();
-    }
     private static string SanitizeWord(string originalWord) => originalWord.Trim(_delimiters);
 
     private static WordWrapper[] OrganizeWords(AnalyzeResult analyzeResult)
     {
         var result = new List<WordWrapper>();
 
+        var pageIndex = 0;
         var lineIndex = 0;
         foreach (var page in analyzeResult.Pages)
         {
@@ -271,27 +283,22 @@ public class TypoCheckerController : ControllerBase
             {
                 foreach (var word in line.GetWords())
                 {
-                    var wrapper = new WordWrapper { LineIndex = lineIndex, Word = word };
+                    var wrapper = new WordWrapper { PageIndex = pageIndex, LineIndex = lineIndex, Word = word };
                     result.Add(wrapper);
                 }
 
                 lineIndex++;
             }
+
+            pageIndex++;
         }
 
         return result.ToArray();
     }
 
-    private static WordWrapper[] OrganizePageWords(IReadOnlyList<DocumentWord> page)
-    {
-        var result = new List<WordWrapper>();
-
-        throw new NotImplementedException();
-
-        return result.ToArray();
-    }
     private sealed record WordWrapper
     {
+        public required int PageIndex { get; init; }
         public required int LineIndex { get; init; }
         public required DocumentWord Word { get; init; }
     }
