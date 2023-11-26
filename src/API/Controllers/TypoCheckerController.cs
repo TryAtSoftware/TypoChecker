@@ -12,9 +12,15 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json;
 using SkiaSharp;
 using PdfColor = iText.Kernel.Colors.Color;
 using SystemColor = System.Drawing.Color;
+using System.Text.Json;
+using System.Text.Encodings.Web;
+using System.Text.Unicode;
+using System.Collections.Generic;
 
 [ApiController, Route("api")]
 public class TypoCheckerController : ControllerBase
@@ -22,6 +28,7 @@ public class TypoCheckerController : ControllerBase
     private const string STORAGE_DIRECTORY_NAME = "_storage";
     private const string DATA_DIRECTORY_NAME = "data";
     private const string RESULTS_DIRECTORY_NAME = "results";
+    private const string STATS_FILE_NAME = "stats.json";
     private const double MIN_CONFIDENCE = 0.8;
     private const int INCH_TO_POINTS = 72;
 
@@ -103,6 +110,9 @@ public class TypoCheckerController : ControllerBase
 
         for (var i = 0; i < analyzedWords.Length; i++) OutlineWord(analyzedWords[i].Word, statuses[i], canvases[analyzedWords[i].PageIndex], pageHeights[analyzedWords[i].PageIndex]);
         pdfDocument.Close();
+
+        var pathToStatsFile = Path.Combine(pathToResultDirectory, STATS_FILE_NAME);
+        await this.SaveFileStatsAsync(file.FileName, pathToStatsFile, statuses, cancellationToken);
     }
 
     private async ValueTask ProcessImageAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
@@ -125,6 +135,55 @@ public class TypoCheckerController : ControllerBase
 
         using var imageData = bitmap.Encode(SKEncodedImageFormat.Png, quality: 100);
         await SaveEditedImageAsync(pathToResult, imageData, cancellationToken);
+
+        var pathToStatsFile = Path.Combine(pathToResultDirectory, STATS_FILE_NAME);
+        await this.SaveFileStatsAsync(file.FileName, pathToStatsFile, statuses, cancellationToken);
+    }
+
+    private async Task SaveFileStatsAsync(string fileName, string pathToStatsFile, WordStatus[] statuses, CancellationToken cancellationToken)
+    {
+        var totalWordsCount = statuses.Length;
+        var incorrectWordsCount = statuses.Where(x => x == WordStatus.Incorrect).Count();
+        var percentIncorrectWords = Convert.ToDouble(incorrectWordsCount) / totalWordsCount * 100;
+        var unreadableWordsCount = statuses.Where(x => x == WordStatus.Unreadable).Count();
+        var percentUnreadableWords = Convert.ToDouble(unreadableWordsCount) / totalWordsCount * 100;
+
+        var currentFileStats = new FileStats
+        {
+            FileName = fileName,
+            TotalWords = totalWordsCount,
+            IncorrectWords = incorrectWordsCount,
+            PercentIncorrectWords = Math.Round(percentIncorrectWords, 2),
+            UnreadableWords = unreadableWordsCount,
+            PercentUnreadableWords = Math.Round(percentUnreadableWords, 2)
+        };
+        var statsFileJson = new List<FileStats>
+        {
+            currentFileStats
+        };
+
+        var options = new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+            WriteIndented = true
+        };
+
+        if (System.IO.File.Exists(pathToStatsFile))
+        {
+            var statsFile = System.IO.File.ReadAllTextAsync(pathToStatsFile, cancellationToken).Result;
+            //TODO: remove warning if possible
+            statsFileJson.AddRange(System.Text.Json.JsonSerializer.Deserialize<List<FileStats>>(statsFile));
+            //janky. Need better solution.
+            System.IO.File.Delete(pathToStatsFile);
+        }
+
+        //not sure how/why this works, but it does.
+        var unprettyJsonData = System.Text.Json.JsonSerializer.SerializeToDocument(statsFileJson, options);
+
+        var jsonElement = System.Text.Json.JsonSerializer.Deserialize<JsonDocument>(unprettyJsonData, options);
+        var prettyJsonData = new List<string>() { System.Text.Json.JsonSerializer.Serialize(jsonElement, options) };
+
+        await System.IO.File.AppendAllLinesAsync(pathToStatsFile, prettyJsonData, cancellationToken);
     }
 
     private static void OutlineWord(DocumentWord word, WordStatus status, PdfCanvas canvas, float height)
