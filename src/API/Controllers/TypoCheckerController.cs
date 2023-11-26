@@ -1,9 +1,14 @@
 ﻿namespace API.Controllers;
 
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Net.Mime;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Unicode;
 using API.Features;
+using API.Models;
 using API.Settings;
 using Azure;
 using Azure.AI.FormRecognizer.DocumentAnalysis;
@@ -12,15 +17,9 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using Newtonsoft.Json.Linq;
-using Newtonsoft.Json;
 using SkiaSharp;
 using PdfColor = iText.Kernel.Colors.Color;
 using SystemColor = System.Drawing.Color;
-using System.Text.Json;
-using System.Text.Encodings.Web;
-using System.Text.Unicode;
-using System.Collections.Generic;
 
 [ApiController, Route("api")]
 public class TypoCheckerController : ControllerBase
@@ -32,13 +31,17 @@ public class TypoCheckerController : ControllerBase
     private const double MIN_CONFIDENCE = 0.8;
     private const int INCH_TO_POINTS = 72;
 
-    private static readonly char[] _delimiters = ".,-!?:;'\"„“()".ToCharArray();
+    private static readonly char[] _parasiteCharacters = ".,-–!?:;'/\"„“()<>№".ToCharArray();
+    private static readonly char[] _delimiters = "/".ToCharArray();
+    private static readonly HashSet<char> _numericalCharacters = new HashSet<char>("0123456789:%.,+-/*");
 
     private static readonly PdfColor _incorrectWordPdfColor = new DeviceRgb(SystemColor.Red);
     private static readonly PdfColor _unreadableWordPdfColor = new DeviceRgb(SystemColor.Orange);
 
     private static readonly SKPaint _incorrectWordImgPaint = new SKPaint { Color = SKColors.Red, Style = SKPaintStyle.Stroke };
     private static readonly SKPaint _unreadableWordImgPaint = new SKPaint { Color = SKColors.Orange, Style = SKPaintStyle.Stroke };
+    
+    private static readonly JsonSerializerOptions _jsonSerializerOptions = new JsonSerializerOptions { Encoder = JavaScriptEncoder.Create(UnicodeRanges.All), WriteIndented = true };
 
     private readonly IWordsRegister _wordsRegister;
     private readonly DocumentAnalysisClient _client;
@@ -61,7 +64,14 @@ public class TypoCheckerController : ControllerBase
         Directory.CreateDirectory(pathToResultDirectory);
 
         var parallelOptions = new ParallelOptions { CancellationToken = cancellationToken, MaxDegreeOfParallelism = 5 };
-        await Parallel.ForEachAsync(this.Request.Form.Files, parallelOptions, (file, ct) => this.ProcessImageAsync(pathToDataDirectory, pathToResultDirectory, file, ct));
+        var allStatistics = new ConcurrentBag<FileStatistics>();
+        await Parallel.ForEachAsync(this.Request.Form.Files, parallelOptions, async (file, ct) =>
+        {
+            var stats = await this.ProcessImageAsync(pathToDataDirectory, pathToResultDirectory, file, ct);
+            allStatistics.Add(stats);
+        });
+
+        await SaveStatisticsAsync(pathToResultDirectory, allStatistics, cancellationToken);
 
         return await this.FinalizeRequestAsync(pathToResultDirectory);
     }
@@ -76,12 +86,19 @@ public class TypoCheckerController : ControllerBase
         Directory.CreateDirectory(pathToResultDirectory);
 
         var parallelOptions = new ParallelOptions { CancellationToken = cancellationToken, MaxDegreeOfParallelism = 5 };
-        await Parallel.ForEachAsync(this.Request.Form.Files, parallelOptions, (file, ct) => this.ProcessPdfAsync(pathToDataDirectory, pathToResultDirectory, file, ct));
+        var allStatistics = new ConcurrentBag<FileStatistics>();
+        await Parallel.ForEachAsync(this.Request.Form.Files, parallelOptions, async (file, ct) =>
+        {
+            var stats = await this.ProcessPdfAsync(pathToDataDirectory, pathToResultDirectory, file, ct);
+            allStatistics.Add(stats);
+        });
+
+        await SaveStatisticsAsync(pathToResultDirectory, allStatistics, cancellationToken);
 
         return await this.FinalizeRequestAsync(pathToResultDirectory);
     }
 
-    private async ValueTask ProcessPdfAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
+    private async ValueTask<FileStatistics> ProcessPdfAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
     {
         var pathToFile = Path.Combine(pathToDataDirectory, file.FileName);
         var pathToResult = Path.Combine(pathToResultDirectory, file.FileName);
@@ -111,11 +128,10 @@ public class TypoCheckerController : ControllerBase
         for (var i = 0; i < analyzedWords.Length; i++) OutlineWord(analyzedWords[i].Word, statuses[i], canvases[analyzedWords[i].PageIndex], pageHeights[analyzedWords[i].PageIndex]);
         pdfDocument.Close();
 
-        var pathToStatsFile = Path.Combine(pathToResultDirectory, STATS_FILE_NAME);
-        await this.SaveFileStatsAsync(file.FileName, pathToStatsFile, statuses, cancellationToken);
+        return CalculateStatistics(file.FileName, statuses, analyzationResult);
     }
 
-    private async ValueTask ProcessImageAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
+    private async ValueTask<FileStatistics> ProcessImageAsync(string pathToDataDirectory, string pathToResultDirectory, IFormFile file, CancellationToken cancellationToken)
     {
         var pathToFile = Path.Combine(pathToDataDirectory, file.FileName);
         var pathToResult = Path.Combine(pathToResultDirectory, Path.ChangeExtension(file.FileName, "png"));
@@ -136,54 +152,34 @@ public class TypoCheckerController : ControllerBase
         using var imageData = bitmap.Encode(SKEncodedImageFormat.Png, quality: 100);
         await SaveEditedImageAsync(pathToResult, imageData, cancellationToken);
 
-        var pathToStatsFile = Path.Combine(pathToResultDirectory, STATS_FILE_NAME);
-        await this.SaveFileStatsAsync(file.FileName, pathToStatsFile, statuses, cancellationToken);
+        return CalculateStatistics(file.FileName, statuses, analyzationResult);
     }
 
-    private async Task SaveFileStatsAsync(string fileName, string pathToStatsFile, WordStatus[] statuses, CancellationToken cancellationToken)
+    private static FileStatistics CalculateStatistics(string fileName, WordStatus[] statuses, AnalyzeResult analyzeResult)
     {
-        var totalWordsCount = statuses.Length;
-        var incorrectWordsCount = statuses.Where(x => x == WordStatus.Incorrect).Count();
-        var percentIncorrectWords = Convert.ToDouble(incorrectWordsCount) / totalWordsCount * 100;
-        var unreadableWordsCount = statuses.Where(x => x == WordStatus.Unreadable).Count();
-        var percentUnreadableWords = Convert.ToDouble(unreadableWordsCount) / totalWordsCount * 100;
+        var totalWordsCount = (ulong)statuses.LongLength;
 
-        var currentFileStats = new FileStats
+        ulong incorrectWordsCount = 0, unreadableWordsCount = 0;
+        foreach (var status in statuses)
         {
-            FileName = fileName,
-            TotalWords = totalWordsCount,
-            IncorrectWords = incorrectWordsCount,
-            PercentIncorrectWords = Math.Round(percentIncorrectWords, 2),
-            UnreadableWords = unreadableWordsCount,
-            PercentUnreadableWords = Math.Round(percentUnreadableWords, 2)
-        };
-        var statsFileJson = new List<FileStats>
-        {
-            currentFileStats
-        };
-
-        var options = new JsonSerializerOptions
-        {
-            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
-            WriteIndented = true
-        };
-
-        if (System.IO.File.Exists(pathToStatsFile))
-        {
-            var statsFile = System.IO.File.ReadAllTextAsync(pathToStatsFile, cancellationToken).Result;
-            //TODO: remove warning if possible
-            statsFileJson.AddRange(System.Text.Json.JsonSerializer.Deserialize<List<FileStats>>(statsFile));
-            //janky. Need better solution.
-            System.IO.File.Delete(pathToStatsFile);
+            if (status == WordStatus.Incorrect) incorrectWordsCount++;
+            else if (status == WordStatus.Unreadable) unreadableWordsCount++;
         }
 
-        //not sure how/why this works, but it does.
-        var unprettyJsonData = System.Text.Json.JsonSerializer.SerializeToDocument(statsFileJson, options);
+        var percentIncorrectWords = Math.Round(1M * incorrectWordsCount / totalWordsCount * 100, 5);
+        var percentUnreadableWords = Math.Round(1M * unreadableWordsCount / totalWordsCount * 100, 5);
 
-        var jsonElement = System.Text.Json.JsonSerializer.Deserialize<JsonDocument>(unprettyJsonData, options);
-        var prettyJsonData = new List<string>() { System.Text.Json.JsonSerializer.Serialize(jsonElement, options) };
-
-        await System.IO.File.AppendAllLinesAsync(pathToStatsFile, prettyJsonData, cancellationToken);
+        var currentFileStats = new FileStatistics
+        {
+            FileName = fileName,
+            Pages = analyzeResult.Pages.Count,
+            TotalWords = totalWordsCount,
+            IncorrectWords = incorrectWordsCount,
+            IncorrectWordsPercentage = percentIncorrectWords,
+            UnreadableWords = unreadableWordsCount,
+            UnreadableWordsPercentage = percentUnreadableWords
+        };
+        return currentFileStats;
     }
 
     private static void OutlineWord(DocumentWord word, WordStatus status, PdfCanvas canvas, float height)
@@ -274,8 +270,13 @@ public class TypoCheckerController : ControllerBase
 
             var finalWord = wordBuilder.ToString();
             wordBuilder.Length = 0;
+            
+            // In case some punctuations is analyzed as a separate word:
+            if (string.IsNullOrWhiteSpace(finalWord)) return true;
 
-            if (this._wordsRegister.Contains(finalWord)) return true;
+            var finalWordParts = finalWord.Split(_delimiters);
+            var isCorrect = finalWordParts.All(p => ConsistsOfNumericalSymbolsOnly(p) || this._wordsRegister.Contains(p));
+            if (isCorrect) return true;
         }
 
         return false;
@@ -312,6 +313,14 @@ public class TypoCheckerController : ControllerBase
         return operation.Value;
     }
 
+    private static async Task SaveStatisticsAsync(string pathToResultDirectory, IEnumerable<FileStatistics> allStatistics, CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(allStatistics.OrderBy(x => x.FileName), _jsonSerializerOptions);
+        var pathToStatisticsFile = Path.Combine(pathToResultDirectory, STATS_FILE_NAME);
+
+        await System.IO.File.WriteAllTextAsync(pathToStatisticsFile, json, cancellationToken: cancellationToken);
+    }
+
     private static async Task<SKBitmap> LoadImageForEditAsync(string pathToFile, CancellationToken cancellationToken)
     {
         await using var fileStream = new FileStream(pathToFile, FileMode.Open, FileAccess.Read, FileShare.None);
@@ -328,7 +337,9 @@ public class TypoCheckerController : ControllerBase
         await imageDataStream.CopyToAsync(fileStream, cancellationToken);
     }
 
-    private static string SanitizeWord(string originalWord) => originalWord.Trim(_delimiters);
+    private static string SanitizeWord(string originalWord) => originalWord.Trim(_parasiteCharacters);
+
+    private static bool ConsistsOfNumericalSymbolsOnly(string word) => word.All(_numericalCharacters.Contains);
 
     private static WordWrapper[] OrganizeWords(AnalyzeResult analyzeResult)
     {
