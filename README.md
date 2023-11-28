@@ -49,7 +49,7 @@ Send a POST request to https://localhost:7055/api/check_pdfs with the PDF file(s
 ```bash
 curl -X POST -H "Content-Type: multipart/form-data" -F "file1=@\"path\to\file1_with_latinic_alphabet_name.pdf\"" -F "file2=@\"path\to\file2_with_latinic_alphabet_name.pdf\"" https://localhost:7055/api/check_pdfs -o result.zip
 ```
-##### Response:
+#### Response:
 
 After the process has completed the results.zip file will be saved wherever you launched the command from. Results.zip contains all the modified PDFs with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
 
@@ -66,7 +66,7 @@ After the process has completed the results.zip file will be saved wherever you 
 7. Repeat the process for additional files.
 8. Click on the Send and Download button from the dropdown next to the Send button.
 ![Screenshot_1](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/f7b51f7f-05d5-48b0-b1af-2dfbaa293cbb)
-##### Response:
+#### Response:
 
 After the process has completed you will get a prompt for where to save the results.zip file. Results.zip contains all the modified PDFs with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
 
@@ -78,7 +78,7 @@ Send a POST request to https://localhost:7055/api/check_imgs with the image file
 ```bash
 curl -X POST -H "Content-Type: multipart/form-data" -F "file1=@\"path\to\image1_with_english_alphabet_name.jpg\"" -F "file2=@\"path\to\image2_with_english_alphabet_name.jpg\"" https://localhost:7055/api/check_imgs -o result.zip
 ```
-##### Response:
+#### Response:
 
 After the process has completed the results.zip file will be saved wherever you launched the command from. Results.zip contains all the modified images with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
 
@@ -95,6 +95,6 @@ After the process has completed the results.zip file will be saved wherever you 
 7. Repeat step 6 for additional files.
 8. Click on the Send and Download button from the dropdown menu next to the Send button.
 ![Screenshot_2](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/4137470f-b6f2-47c4-b922-635018629fe8)
-##### Response:
+#### Response:
 
 After the process has completed you will get a prompt for where to save the results.zip file. Results.zip contains all the modified images with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
