@@ -60,9 +60,9 @@ After the process has completed the results.zip file will be saved wherever you 
 4. Switch to the Body tab.
 5. Select form-data as the body type.
 6. Add the files:
-    Set the Key as file1 (or any key you prefer).
-    Set the Type as File from the dropdown on the right of the Key.
-    For Value, select the file by clicking on the "Choose Files" button and select your PDF file.
+    * Set the Key as file1 (or any key you prefer).
+    * Set the Type as File from the dropdown on the right of the Key.
+    * For Value, select the file by clicking on the "Choose Files" button and select your PDF file.
 7. Repeat the process for additional files.
 8. Click on the Send and Download button from the dropdown next to the Send button.
 ![Screenshot_1](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/f7b51f7f-05d5-48b0-b1af-2dfbaa293cbb)
