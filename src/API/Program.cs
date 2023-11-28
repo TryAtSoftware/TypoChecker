@@ -1,7 +1,7 @@
 namespace API;
 
-using API.Features;
 using API.Settings;
+using Core.Features;
 
 public class Program
 {
@@ -13,7 +13,7 @@ public class Program
         builder.Configuration.AddJsonFile("appsettings.local.json", optional: true);
         builder.Services.Configure<DocumentIntelligenceSettings>(builder.Configuration.GetSection(DocumentIntelligenceSettings.Section));
 
-        builder.Services.AddSingleton<IWordsRegister, WordsRegister>();
+        builder.Services.AddSingleton<IWordsRegister, SetWordsRegister>();
 
         builder.Services.AddControllers();
         // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
