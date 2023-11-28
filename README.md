@@ -41,7 +41,7 @@ This will start the TypoChecker API.
 
 After compiling and running the API, you can use the following endpoints to process PDFs and images:
 
-### Process PDFs
+### **Process PDFs**
 
 Send a POST request to https://localhost:7055/api/check_pdfs with the PDF file(s) you want to process.
 
@@ -50,7 +50,6 @@ Send a POST request to https://localhost:7055/api/check_pdfs with the PDF file(s
 curl -X POST -H "Content-Type: multipart/form-data" -F "file1=@\"path\to\file1_with_latinic_alphabet_name.pdf\"" -F "file2=@\"path\to\file2_with_latinic_alphabet_name.pdf\"" https://localhost:7055/api/check_pdfs -o result.zip
 ```
 #### Response:
-
 Upon completion of the operation, the results.zip file will be stored in the directory from which the command was initiated. Inside results.zip, you'll find all the edited PDFs, each highlighting spelling errors and unidentified words. Additionally, a stats.json file encapsulates comprehensive statistics related to the processed files.
 
 #### Using Postman (or another third party tool):
@@ -68,10 +67,9 @@ Upon completion of the operation, the results.zip file will be stored in the dir
 
 ![Screenshot_1](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/634af9bd-6ba6-4ed9-993f-c6272340c92a)
 #### Response:
-
 Once the operation concludes, a prompt will appear, allowing you to choose the destination for saving the results.zip file. Within results.zip, you'll discover all the refined PDFs featuring highlighted spelling errors and unidentified words. Additionally, a stats.json file encapsulates detailed statistics pertaining to the processed files.
 
-### Process Images
+### **Process Images**
 
 Send a POST request to https://localhost:7055/api/check_imgs with the image file(s) you want to process.
 
@@ -80,7 +78,6 @@ Send a POST request to https://localhost:7055/api/check_imgs with the image file
 curl -X POST -H "Content-Type: multipart/form-data" -F "file1=@\"path\to\image1_with_english_alphabet_name.jpg\"" -F "file2=@\"path\to\image2_with_english_alphabet_name.jpg\"" https://localhost:7055/api/check_imgs -o result.zip
 ```
 #### Response:
-
 Upon completion of the operation, the results.zip file will be stored in the directory from which the command was initiated. Inside results.zip, you'll find all the edited images, each highlighting spelling errors and unidentified words. Additionally, a stats.json file encapsulates comprehensive statistics related to the processed files.
 
 #### Using Postman (or another third party tool):
@@ -98,5 +95,4 @@ Upon completion of the operation, the results.zip file will be stored in the dir
 
 ![Screenshot_2](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/866311f1-e564-4f16-bafa-c9f00e05690e)
 #### Response:
-
 Once the operation concludes, a prompt will appear, allowing you to choose the destination for saving the results.zip file. Within results.zip, you'll discover all the refined images featuring highlighted spelling errors and unidentified words. Additionally, a stats.json file encapsulates detailed statistics pertaining to the processed files.
