@@ -51,7 +51,7 @@ curl -X POST -H "Content-Type: multipart/form-data" -F "file1=@\"path\to\file1_w
 ```
 #### Response:
 
-After the process has completed the results.zip file will be saved wherever you launched the command from. Results.zip contains all the modified PDFs with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
+Upon completion of the operation, the results.zip file will be stored in the directory from which the command was initiated. Inside results.zip, you'll find all the edited PDFs, each highlighting spelling errors and unidentified words. Additionally, a stats.json file encapsulates comprehensive statistics related to the processed files.
 
 #### Using Postman (or another third party tool):
 1. Open Postman and create a new request.
@@ -68,7 +68,7 @@ After the process has completed the results.zip file will be saved wherever you 
 ![Screenshot_1](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/634af9bd-6ba6-4ed9-993f-c6272340c92a)
 #### Response:
 
-After the process has completed you will get a prompt for where to save the results.zip file. Results.zip contains all the modified PDFs with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
+Once the operation concludes, a prompt will appear, allowing you to choose the destination for saving the results.zip file. Within results.zip, you'll discover all the refined PDFs featuring highlighted spelling errors and unidentified words. Additionally, a stats.json file encapsulates detailed statistics pertaining to the processed files.
 
 ### Process Images
 
@@ -80,7 +80,7 @@ curl -X POST -H "Content-Type: multipart/form-data" -F "file1=@\"path\to\image1_
 ```
 #### Response:
 
-After the process has completed the results.zip file will be saved wherever you launched the command from. Results.zip contains all the modified images with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
+Upon completion of the operation, the results.zip file will be stored in the directory from which the command was initiated. Inside results.zip, you'll find all the edited images, each highlighting spelling errors and unidentified words. Additionally, a stats.json file encapsulates comprehensive statistics related to the processed files.
 
 #### Using Postman (or another third party tool):
 1. Open Postman and create a new request.
@@ -97,4 +97,4 @@ After the process has completed the results.zip file will be saved wherever you 
 ![Screenshot_2](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/866311f1-e564-4f16-bafa-c9f00e05690e)
 #### Response:
 
-After the process has completed you will get a prompt for where to save the results.zip file. Results.zip contains all the modified images with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
+Once the operation concludes, a prompt will appear, allowing you to choose the destination for saving the results.zip file. Within results.zip, you'll discover all the refined images featuring highlighted spelling errors and unidentified words. Additionally, a stats.json file encapsulates detailed statistics pertaining to the processed files.
