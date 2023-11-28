@@ -65,6 +65,7 @@ Upon completion of the operation, the results.zip file will be stored in the dir
     * For Value, select the file by clicking on the "Choose Files" button and select your PDF file.
 7. Repeat the process for additional files.
 8. Click on the Send and Download button from the dropdown next to the Send button.
+
 ![Screenshot_1](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/634af9bd-6ba6-4ed9-993f-c6272340c92a)
 #### Response:
 
@@ -94,6 +95,7 @@ Upon completion of the operation, the results.zip file will be stored in the dir
     * For Value, select the file by clicking on the "Choose Files" button and select your image.
 7. Repeat step 6 for additional files.
 8. Click on the Send and Download button from the dropdown menu next to the Send button.
+
 ![Screenshot_2](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/866311f1-e564-4f16-bafa-c9f00e05690e)
 #### Response:
 
