@@ -89,9 +89,9 @@ After the process has completed the results.zip file will be saved wherever you 
 4. Switch to the Body tab.
 5. Select form-data as the body type.
 6. Add the files:
-    Set the Key as file1 (or any key you prefer).
-    Set the Type as File from the dropdown menu on the right of the Key.
-    For Value, select the file by clicking on the "Choose Files" button and select your image.
+    * Set the Key as file1 (or any key you prefer).
+    * Set the Type as File from the dropdown menu on the right of the Key.
+    * For Value, select the file by clicking on the "Choose Files" button and select your image.
 7. Repeat step 6 for additional files.
 8. Click on the Send and Download button from the dropdown menu next to the Send button.
 ![Screenshot_2](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/4137470f-b6f2-47c4-b922-635018629fe8)
