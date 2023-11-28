@@ -14,7 +14,7 @@ Before you begin, make sure you have the following:
 
 ### 2. Configuration
 
-Create a `appsettings.local.json` file in the `/src/API` directory. Add the following content, replacing `"your API key"` and `"your azure document intelligence endpoint"` with your actual Azure Document Intelligence API key and endpoint:
+Create an `appsettings.local.json` file in the `/src/API` directory. Add the following content, replacing `"your API key"` and `"your azure document intelligence endpoint"` with your actual Azure Document Intelligence API key and endpoint:
 
 ```json
 {
@@ -65,7 +65,7 @@ After the process has completed the results.zip file will be saved wherever you 
     * For Value, select the file by clicking on the "Choose Files" button and select your PDF file.
 7. Repeat the process for additional files.
 8. Click on the Send and Download button from the dropdown next to the Send button.
-![Screenshot_1](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/f7b51f7f-05d5-48b0-b1af-2dfbaa293cbb)
+![Screenshot_1](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/634af9bd-6ba6-4ed9-993f-c6272340c92a)
 #### Response:
 
 After the process has completed you will get a prompt for where to save the results.zip file. Results.zip contains all the modified PDFs with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
@@ -94,7 +94,7 @@ After the process has completed the results.zip file will be saved wherever you 
     * For Value, select the file by clicking on the "Choose Files" button and select your image.
 7. Repeat step 6 for additional files.
 8. Click on the Send and Download button from the dropdown menu next to the Send button.
-![Screenshot_2](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/4137470f-b6f2-47c4-b922-635018629fe8)
+![Screenshot_2](https://github.com/TryAtSoftware/TypoChecker/assets/121127640/866311f1-e564-4f16-bafa-c9f00e05690e)
 #### Response:
 
 After the process has completed you will get a prompt for where to save the results.zip file. Results.zip contains all the modified images with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
