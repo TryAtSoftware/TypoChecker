@@ -98,7 +98,3 @@ After the process has completed the results.zip file will be saved wherever you 
 ##### Response:
 
 After the process has completed you will get a prompt for where to save the results.zip file. Results.zip contains all the modified images with spelling errors and unknown words marked and a stats.json file containing all the statistics for the files sent.
-
-## License
-
-This project is licensed under the MIT License.
