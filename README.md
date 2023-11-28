@@ -41,7 +41,7 @@ This will start the TypoChecker API.
 
 After compiling and running the API, you can use the following endpoints to process PDFs and images:
 
-### **Process PDFs**
+### Process PDFs
 
 Send a POST request to https://localhost:7055/api/check_pdfs with the PDF file(s) you want to process.
 
@@ -69,7 +69,7 @@ Upon completion of the operation, the results.zip file will be stored in the dir
 #### Response:
 Once the operation concludes, a prompt will appear, allowing you to choose the destination for saving the results.zip file. Within results.zip, you'll discover all the refined PDFs featuring highlighted spelling errors and unidentified words. Additionally, a stats.json file encapsulates detailed statistics pertaining to the processed files.
 
-### **Process Images**
+### Process Images
 
 Send a POST request to https://localhost:7055/api/check_imgs with the image file(s) you want to process.
 
